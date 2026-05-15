@@ -1,0 +1,682 @@
+
+#include <iostream>
+#include <vector>
+#include <ctime>
+#include <cstdlib>
+#include <string>
+#include <conio.h>
+
+using namespace std;
+
+enum CellType
+{
+    WALL = '#',
+    PATH = ' ',
+    PLAYER = 'P',
+    EXIT = 'Q',
+    TRAP = 'T',
+    BONUS = 'B',
+    ENEMY = 'E'
+};
+
+const int MAX_LEVEL = 100;
+const int MAX_ENEMIES = 3;
+
+class Entity
+{
+protected:
+    int x, y;
+
+public:
+    Entity(int px = 1, int py = 1) : x(px), y(py) {}
+
+    virtual void displayInfo() const = 0;
+
+    inline int getX() const { return x; }
+    inline int getY() const { return y; }
+
+    inline void setX(int nx) { x = nx; }
+    inline void setY(int ny) { y = ny; }
+
+    virtual ~Entity() {}
+};
+
+class Player : public Entity
+{
+private:
+    int moves, score, lives;
+
+public:
+    Player() : Entity(1, 1), moves(0), score(0), lives(3) {}
+
+    void addScore() { score += 5; }
+    void addScore(int s) { score += s; }
+
+    void incrementMoves() { moves++; }
+
+    void loseLife() { lives--; }
+
+    void resetPosition()
+    {
+        x = 1;
+        y = 1;
+    }
+
+    void displayInfo() const override
+    {
+        cout << "Player Position: (" << x << "," << y << ")" << endl;
+    }
+
+    inline int getMoves() const { return moves; }
+    inline int getScore() const { return score; }
+    inline int getLives() const { return lives; }
+};
+
+class Enemy : public Entity
+{
+public:
+    bool destroyed;
+
+    Enemy(int px = 2, int py = 2)
+        : Entity(px, py), destroyed(false) {}
+
+    void displayInfo() const override
+    {
+        if (!destroyed)
+            cout << "Enemy Position: (" << x << "," << y << ")" << endl;
+    }
+};
+
+class Maze
+{
+private:
+    int rows, cols;
+    vector<vector<char>> grid;
+
+public:
+    Maze(int r = 10, int c = 10) : rows(r), cols(c)
+    {
+        grid.resize(rows, vector<char>(cols, WALL));
+    }
+
+    void display() const
+    {
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < cols; j++)
+                cout << grid[i][j];
+
+            cout << endl;
+        }
+    }
+
+    char getCell(int r, int c) const
+    {
+        return grid[r][c];
+    }
+
+    void setCell(int r, int c, char value)
+    {
+        grid[r][c] = value;
+    }
+
+    inline int getRows() const { return rows; }
+    inline int getCols() const { return cols; }
+};
+
+class Game
+{
+private:
+    int level;
+    Maze *maze;
+    Player player;
+
+    int exitX, exitY;
+
+    int numEnemies;
+
+    vector<Enemy> enemies;
+    vector<bool> enemyDestroyedThisLevel;
+
+public:
+    Game();
+    ~Game();
+
+    void generateMaze();
+
+    void displayHUD() const;
+
+    void movePlayer(char input);
+
+    bool tryDestroyEnemy();
+
+    void moveEnemies();
+
+    void checkPlayerEnemyCollision();
+
+    void play();
+};
+
+Game::Game()
+{
+    level = 1;
+    maze = nullptr;
+
+    srand(time(0));
+}
+
+Game::~Game()
+{
+    delete maze;
+}
+
+void Game::generateMaze()
+{
+    int size = 7 + level * 2;
+
+    delete maze;
+    maze = new Maze(size, size);
+
+    for (int i = 1; i < size - 1; i++)
+    {
+        for (int j = 1; j < size - 1; j++)
+        {
+            maze->setCell(i, j, PATH);
+        }
+    }
+
+    for (int i = 0; i < level * 10; i++)
+    {
+        int r = rand() % size;
+        int c = rand() % size;
+
+        if (r != 1 && c != 1)
+            maze->setCell(r, c, WALL);
+    }
+
+    for (int i = 0; i < level * 2; i++)
+    {
+        int r = rand() % size;
+        int c = rand() % size;
+
+        if (maze->getCell(r, c) == PATH)
+            maze->setCell(r, c, TRAP);
+    }
+
+    for (int i = 0; i < level; i++)
+    {
+        int r = rand() % size;
+        int c = rand() % size;
+
+        if (maze->getCell(r, c) == PATH)
+            maze->setCell(r, c, BONUS);
+    }
+
+    exitX = size - 2;
+    exitY = size - 2;
+
+    maze->setCell(exitX, exitY, EXIT);
+
+    player.resetPosition();
+
+    maze->setCell(player.getX(), player.getY(), PLAYER);
+
+    if (level < MAX_ENEMIES)
+        numEnemies = level;
+    else
+        numEnemies = MAX_ENEMIES;
+
+    enemies.clear();
+    enemyDestroyedThisLevel.clear();
+
+    for (int i = 0; i < numEnemies; i++)
+    {
+        int ex, ey;
+
+        bool valid = false;
+
+        while (!valid)
+        {
+            ex = rand() % size;
+            ey = rand() % size;
+
+            valid = true;
+
+            if (maze->getCell(ex, ey) != PATH)
+                valid = false;
+
+            if (ex == player.getX() && ey == player.getY())
+                valid = false;
+
+            if (ex == exitX && ey == exitY)
+                valid = false;
+
+            for (int j = 0; j < i; j++)
+            {
+                if (ex == enemies[j].getX() &&
+                    ey == enemies[j].getY())
+                {
+                    valid = false;
+                }
+            }
+        }
+
+        enemies.push_back(Enemy(ex, ey));
+
+        maze->setCell(ex, ey, ENEMY);
+
+        enemyDestroyedThisLevel.push_back(false);
+    }
+}
+
+void Game::displayHUD() const
+{
+    cout << "\n====================================\n";
+    cout << "Level : " << level << endl;
+    cout << "Score : " << player.getScore() << endl;
+    cout << "Moves : " << player.getMoves() << endl;
+    cout << "Lives : " << player.getLives() << endl;
+    cout << "====================================\n";
+}
+
+bool Game::tryDestroyEnemy()
+{
+    int px = player.getX();
+    int py = player.getY();
+
+    for (int i = 0; i < numEnemies; i++)
+    {
+        if (enemies[i].destroyed ||
+            enemyDestroyedThisLevel[i])
+            continue;
+
+        int ex = enemies[i].getX();
+        int ey = enemies[i].getY();
+
+        if ((abs(px - ex) == 1 && py == ey) ||
+            (abs(py - ey) == 1 && px == ex))
+        {
+            cout << "Enemy destroyed! +20 Score.\n";
+
+            player.addScore(20);
+
+            maze->setCell(ex, ey, PATH);
+
+            enemies[i].destroyed = true;
+            enemyDestroyedThisLevel[i] = true;
+
+            system("pause");
+
+            return true;
+        }
+    }
+
+    cout << "Enemy not adjacent! Can't attack.\n";
+
+    system("pause");
+
+    return false;
+}
+
+void Game::movePlayer(char input)
+{
+    int dx = 0, dy = 0;
+
+    switch (input)
+    {
+    case 'w':
+        dx = -1;
+        break;
+
+    case 's':
+        dx = 1;
+        break;
+
+    case 'a':
+        dy = -1;
+        break;
+
+    case 'd':
+        dy = 1;
+        break;
+
+    default:
+        return;
+    }
+
+    int nx = player.getX() + dx;
+    int ny = player.getY() + dy;
+
+    if (nx < 0 || ny < 0 ||
+        nx >= maze->getRows() ||
+        ny >= maze->getCols())
+        return;
+
+    char nextCell = maze->getCell(nx, ny);
+
+    if (nextCell == WALL)
+        return;
+
+    bool enemyCollision = false;
+    int enemyIdx = -1;
+
+    for (int i = 0; i < numEnemies; i++)
+    {
+        if (!enemies[i].destroyed &&
+            !enemyDestroyedThisLevel[i] &&
+            nx == enemies[i].getX() &&
+            ny == enemies[i].getY())
+        {
+            enemyCollision = true;
+            enemyIdx = i;
+            break;
+        }
+    }
+
+    if (enemyCollision)
+    {
+        cout << "Enemy touched! Lives decreased by 1.\n";
+
+        player.loseLife();
+
+        maze->setCell(
+            enemies[enemyIdx].getX(),
+            enemies[enemyIdx].getY(),
+            PATH);
+
+        enemies[enemyIdx].destroyed = true;
+        enemyDestroyedThisLevel[enemyIdx] = true;
+
+        maze->setCell(player.getX(),
+                      player.getY(),
+                      PATH);
+
+        if (player.getLives() > 0)
+        {
+            player.resetPosition();
+
+            maze->setCell(player.getX(),
+                          player.getY(),
+                          PLAYER);
+        }
+
+        system("pause");
+
+        return;
+    }
+
+    maze->setCell(player.getX(),
+                  player.getY(),
+                  PATH);
+
+    if (nextCell == TRAP)
+    {
+        cout << "Trap touched! Lives decreased by 1.\n";
+
+        player.loseLife();
+
+        maze->setCell(player.getX(),
+                      player.getY(),
+                      PATH);
+
+        if (player.getLives() > 0)
+        {
+            player.resetPosition();
+
+            maze->setCell(player.getX(),
+                          player.getY(),
+                          PLAYER);
+        }
+
+        system("pause");
+
+        return;
+    }
+    else if (nextCell == EXIT)
+    {
+        cout << "Level Completed!\n";
+
+        player.addScore(50);
+
+        level++;
+
+        if (level > MAX_LEVEL)
+        {
+            cout << "\nYOU WON THE GAME!\n";
+            cout << "Final Score: "
+                 << player.getScore() << endl;
+
+            exit(0);
+        }
+
+        generateMaze();
+
+        return;
+    }
+
+    player.setX(nx);
+    player.setY(ny);
+
+    player.incrementMoves();
+
+    maze->setCell(player.getX(),
+                  player.getY(),
+                  PLAYER);
+}
+
+void Game::moveEnemies()
+{
+    int dirX[4] = {-1, 1, 0, 0};
+    int dirY[4] = {0, 0, -1, 1};
+
+    for (int i = 0; i < numEnemies; i++)
+    {
+        if (enemies[i].destroyed ||
+            enemyDestroyedThisLevel[i])
+            continue;
+
+        int oldX = enemies[i].getX();
+        int oldY = enemies[i].getY();
+
+        for (int tries = 0; tries < 10; tries++)
+        {
+            int d = rand() % 4;
+
+            int nx = oldX + dirX[d];
+            int ny = oldY + dirY[d];
+
+            if (nx < 0 || ny < 0 ||
+                nx >= maze->getRows() ||
+                ny >= maze->getCols())
+                continue;
+
+            char nextCell = maze->getCell(nx, ny);
+
+            if (nextCell != PATH)
+                continue;
+
+            bool clash = false;
+
+            for (int j = 0; j < numEnemies; j++)
+            {
+                if (j == i)
+                    continue;
+
+                if (enemies[j].destroyed ||
+                    enemyDestroyedThisLevel[j])
+                    continue;
+
+                if (nx == enemies[j].getX() &&
+                    ny == enemies[j].getY())
+                {
+                    clash = true;
+                }
+            }
+
+            if (nx == player.getX() &&
+                ny == player.getY())
+                clash = true;
+
+            if (nx == exitX &&
+                ny == exitY)
+                clash = true;
+
+            if (clash)
+                continue;
+
+            maze->setCell(oldX, oldY, PATH);
+
+            enemies[i].setX(nx);
+            enemies[i].setY(ny);
+
+            maze->setCell(enemies[i].getX(),
+                          enemies[i].getY(),
+                          ENEMY);
+
+            break;
+        }
+    }
+}
+
+void Game::checkPlayerEnemyCollision()
+{
+    for (int i = 0; i < numEnemies; i++)
+    {
+        if (!enemies[i].destroyed &&
+            !enemyDestroyedThisLevel[i] &&
+            player.getX() == enemies[i].getX() &&
+            player.getY() == enemies[i].getY())
+        {
+            cout << "Enemy touched! Lives decreased by 1.\n";
+
+            player.loseLife();
+
+            maze->setCell(
+                enemies[i].getX(),
+                enemies[i].getY(),
+                PATH);
+
+            enemies[i].destroyed = true;
+            enemyDestroyedThisLevel[i] = true;
+
+            maze->setCell(player.getX(),
+                          player.getY(),
+                          PATH);
+
+            if (player.getLives() > 0)
+            {
+                player.resetPosition();
+
+                maze->setCell(player.getX(),
+                              player.getY(),
+                              PLAYER);
+            }
+
+            system("pause");
+        }
+    }
+}
+
+/* ---------- NEW INSTRUCTION SCREEN ---------- */
+
+void showInstructions()
+{
+    system("cls");
+
+    cout << "====================================================\n";
+    cout << "                MAZE ESCAPE GAME\n";
+    cout << "====================================================\n\n";
+
+    cout << "---------------- GAME CONTROLS ----------------\n\n";
+
+    cout << "W  -> Move Up\n";
+    cout << "S  -> Move Down\n";
+    cout << "A  -> Move Left\n";
+    cout << "D  -> Move Right\n";
+    cout << "SPACE -> Attack Enemy\n\n";
+
+    cout << "---------------- GAME SYMBOLS -----------------\n\n";
+
+    cout << "P -> Player\n";
+    cout << "Q -> Exit Point\n";
+    cout << "E -> Enemy\n";
+    cout << "T -> Trap\n";
+    cout << "B -> Bonus\n";
+    cout << "# -> Wall\n\n";
+
+    cout << "---------------- GAME RULES -------------------\n\n";
+
+    cout << "1. Reach Q to complete the level.\n";
+    cout << "2. Avoid enemies and traps.\n";
+    cout << "3. Enemy or trap decreases one life.\n";
+    cout << "4. Destroy enemy using SPACE key.\n";
+    cout << "5. Complete all levels to win.\n\n";
+
+    cout << "====================================================\n";
+    cout << "            PRESS ENTER TO START GAME\n";
+    cout << "====================================================\n";
+
+    cin.get();
+}
+
+void Game::play()
+{
+    generateMaze();
+
+    while (player.getLives() > 0)
+    {
+        system("cls");
+
+        displayHUD();
+
+        maze->display();
+
+        player.displayInfo();
+
+        for (int i = 0; i < numEnemies; i++)
+        {
+            if (!enemies[i].destroyed &&
+                !enemyDestroyedThisLevel[i])
+            {
+                enemies[i].displayInfo();
+            }
+        }
+
+        cout << "\nMove (W/A/S/D)";
+        cout << "\nPress SPACE to attack adjacent enemy: ";
+
+        char ch = _getch();
+
+        //if (ch == ' ')
+        //{
+        //    tryDestroyEnemy();
+        //}
+        ///else
+         if (ch == 'w' ||
+                 ch == 'a' ||
+                 ch == 's' ||
+                 ch == 'd')
+        {
+            movePlayer(ch);
+        }
+
+        moveEnemies();
+
+        checkPlayerEnemyCollision();
+    }
+
+    cout << "\nGAME OVER!\n";
+    cout << "Final Score: "
+         << player.getScore() << endl;
+}
+
+int main()
+{
+    showInstructions();
+
+    Game g;
+
+    g.play();
+
+    return 0;
+}
